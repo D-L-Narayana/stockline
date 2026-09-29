@@ -1,0 +1,88 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>StockLine — Inventory API console</title>
+<style>
+:root{--red:#CC0000;--ink:#111827;--muted:#6b7280;--line:#e5e7eb}
+*{box-sizing:border-box}body{margin:0;font:15px/1.5 system-ui,sans-serif;color:var(--ink);background:#fafafa}
+header{background:var(--red);color:#fff;padding:22px 24px}h1{margin:0;font-size:24px}header p{margin:4px 0 0;opacity:.9}
+header a{color:#fff}main{max-width:1100px;margin:0 auto;padding:20px;display:grid;gap:18px;grid-template-columns:1fr 1fr}
+section{background:#fff;border:1px solid var(--line);border-radius:10px;padding:16px}h2{margin:0 0 8px;font-size:17px}
+.full{grid-column:1/-1}table{width:100%;border-collapse:collapse;font-size:13px}th,td{padding:5px 8px;border-bottom:1px solid var(--line);text-align:left}
+th{color:var(--muted)}.low{color:var(--red);font-weight:600}button{background:var(--red);color:#fff;border:0;border-radius:6px;padding:7px 12px;cursor:pointer;font-weight:600}
+button.sec{background:#374151}input,select{padding:6px 8px;border:1px solid var(--line);border-radius:6px;font:inherit}
+.row{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin:6px 0}pre{background:#0f172a;color:#e2e8f0;padding:10px;border-radius:8px;font-size:12px;overflow:auto;max-height:260px;margin:8px 0 0}
+.muted{color:var(--muted);font-size:13px}.mode{font-size:13px;background:rgba(0,0,0,.18);display:inline-block;padding:2px 8px;border-radius:6px;margin-top:8px!important}@media(max-width:800px){main{grid-template-columns:1fr}}
+</style></head><body>
+<header><h1>StockLine</h1><p>Multi-store inventory & order REST API · FastAPI + SQLite · <a href="docs" id="docsLink">OpenAPI docs</a> · <a href="https://github.com/D-L-Narayana/stockline">source</a></p><p id="mode" class="mode">connecting…</p></header>
+<main>
+<section class="full"><h2>Inventory <span class="muted" id="invmeta"></span></h2>
+<div class="row"><label>Store <select id="storeSel"></select></label><label><input type="checkbox" id="lowOnly"> low stock only</label><button class="sec" onclick="loadInv()">Refresh</button></div>
+<div style="overflow:auto"><table id="inv"><thead><tr><th>Store</th><th>SKU</th><th>Product</th><th>On hand</th><th>Reorder pt</th><th>Version</th></tr></thead><tbody></tbody></table></div></section>
+
+<section><h2>Place order</h2><p class="muted">Stock is reserved atomically; the whole order is rejected (409) if any line is short. Send the same Idempotency-Key twice and you get the same order back.</p>
+<div class="row"><label>Store <select id="oStore"></select></label></div>
+<div class="row"><label>Product <select id="oProd"></select></label><label>Qty <input id="oQty" type="number" value="2" min="1" style="width:70px"></label></div>
+<div class="row"><label>Idempotency-Key <input id="oKey" placeholder="optional" style="width:160px"></label><button onclick="placeOrder()">POST /orders</button></div><pre id="oOut">—</pre></section>
+
+<section><h2>Adjust stock</h2><p class="muted">Positive = receipt, negative = write-off. Pass <code>expected_version</code> to get a 409 on stale writes (optimistic locking).</p>
+<div class="row"><label>Store <select id="aStore"></select></label><label>Product <select id="aProd"></select></label></div>
+<div class="row"><label>Delta <input id="aDelta" type="number" value="10" style="width:80px"></label><label>Reason <select id="aReason"><option>receipt</option><option>adjustment</option><option>return</option></select></label><label>Expected version <input id="aVer" type="number" style="width:80px" placeholder="—"></label><button onclick="adjust()">POST /adjust</button></div><pre id="aOut">—</pre></section>
+
+<section><h2>Transfer between stores</h2>
+<div class="row"><label>From <select id="tFrom"></select></label><label>To <select id="tTo"></select></label></div>
+<div class="row"><label>Product <select id="tProd"></select></label><label>Qty <input id="tQty" type="number" value="3" style="width:70px"></label><button onclick="transfer()">POST /transfers</button></div><pre id="tOut">—</pre></section>
+
+<section><h2>Reorder report & ledger integrity</h2><div class="row"><button class="sec" onclick="report()">GET /reports/reorder</button><button class="sec" onclick="integrity()">GET /integrity</button></div><pre id="rOut">—</pre></section>
+
+<section class="full"><h2>Recent orders</h2><div style="overflow:auto"><table id="orders"><thead><tr><th>#</th><th>Store</th><th>Status</th><th>Total</th><th>Lines</th><th>Key</th><th></th></tr></thead><tbody></tbody></table></div></section>
+</main>
+<script>
+const $=s=>document.querySelector(s);let stores=[],products=[];
+const money=c=>'₹'+(c/100).toLocaleString('en-IN',{minimumFractionDigits:2});
+let backend=null; // 'server' | 'pyodide'
+const PY_FILES=['__init__.py','db.py','schemas.py','service.py','seed.py','bridge.py'];
+async function bootPyodide(){
+ $('#mode').textContent='No server found — loading Python runtime in your browser (Pyodide, ~10 MB)…';
+ await new Promise((res,rej)=>{const s=document.createElement('script');s.src='https://cdn.jsdelivr.net/pyodide/v0.27.5/full/pyodide.js';s.onload=res;s.onerror=rej;document.head.appendChild(s)});
+ const py=await loadPyodide({indexURL:'https://cdn.jsdelivr.net/pyodide/v0.27.5/full/'});
+ await py.loadPackage(['pydantic','sqlite3']);
+ py.FS.mkdir('/app');
+ for(const f of PY_FILES){const src=await (await fetch('app/'+f)).text();py.FS.writeFile('/app/'+f,src)}
+ py.runPython(`import sys, os
+os.environ['STOCKLINE_DB']='/stockline.db'
+sys.path.insert(0,'/')
+from app import bridge`);
+ window.__py=py;window.__handle=py.runPython('bridge.handle_json');
+ $('#mode').innerHTML='Running <b>in-browser</b>: the same Python service layer (SQLite ledger, idempotency, optimistic locking) executes via Pyodide. State resets on reload. Run <code>uvicorn app.main:app</code> for the real FastAPI server.';
+ $('#docsLink').href='https://github.com/D-L-Narayana/stockline#api';
+}
+async function detect(){
+ try{const r=await fetch('health',{cache:'no-store'});if(r.ok&&(await r.json()).status==='ok'){backend='server';$('#mode').textContent='Connected to FastAPI server';return}}catch{}
+ await bootPyodide();backend='pyodide';
+}
+async function api(path,opt={}){
+ const t0=performance.now();
+ if(backend==='pyodide'){
+  const res=JSON.parse(window.__handle(opt.method||'GET',path,opt.body||null,JSON.stringify(opt.headers||{})));
+  return{status:res.status,replayed:res.headers['Idempotent-Replayed']||null,ms:(performance.now()-t0).toFixed(1),body:res.body}
+ }
+ const r=await fetch(path.replace(/^\//,''),{headers:{'content-type':'application/json',...(opt.headers||{})},...opt});let j;try{j=await r.json()}catch{j={}}
+ return{status:r.status,replayed:r.headers.get('Idempotent-Replayed'),ms:r.headers.get('X-Response-Time-ms'),body:j}}
+const show=(el,res)=>$(el).textContent=`HTTP ${res.status}${res.replayed?'  Idempotent-Replayed: '+res.replayed:''}  (${res.ms} ms)\n`+JSON.stringify(res.body,null,1);
+function fill(sel,items,label){sel.innerHTML=items.map(i=>`<option value="${i.id}">${label(i)}</option>`).join('')}
+async function init(){await detect();stores=(await api('/stores')).body;products=(await api('/products?limit=100')).body.items;
+ for(const id of['storeSel','oStore','aStore','tFrom','tTo'])fill($('#'+id),stores,s=>s.code);
+ $('#storeSel').insertAdjacentHTML('afterbegin','<option value="">all</option>');$('#storeSel').value='';$('#tTo').selectedIndex=1;
+ for(const id of['oProd','aProd','tProd'])fill($('#'+id),products,p=>`${p.sku} — ${money(p.price_cents)}`);loadInv();loadOrders()}
+async function loadInv(){const s=$('#storeSel').value;const r=await api(`/inventory?limit=200${s?'&store_id='+s:''}${$('#lowOnly').checked?'&low_stock=true':''}`);
+ $('#invmeta').textContent=`(${r.body.total} rows · ${r.ms} ms)`;
+ $('#inv tbody').innerHTML=r.body.items.map(i=>`<tr><td>${i.store_code}</td><td>${i.sku}</td><td>${i.name}</td><td class="${i.below_reorder?'low':''}">${i.on_hand}</td><td>${i.reorder_point}</td><td>${i.version}</td></tr>`).join('')}
+async function loadOrders(){const r=await api('/orders?limit=10');$('#orders tbody').innerHTML=r.body.items.map(o=>`<tr><td>${o.id}</td><td>${(stores.find(s=>s.id===o.store_id)||{}).code||o.store_id}</td><td>${o.status}</td><td>${money(o.total_cents)}</td><td>${o.lines.map(l=>l.sku+'×'+l.quantity).join(', ')}</td><td>${o.idempotency_key||''}</td><td>${o.status==='placed'?`<button class="sec" onclick="cancel(${o.id})">cancel</button>`:''}</td></tr>`).join('')}
+async function placeOrder(){const h={};if($('#oKey').value)h['Idempotency-Key']=$('#oKey').value;
+ show('#oOut',await api('/orders',{method:'POST',headers:h,body:JSON.stringify({store_id:+$('#oStore').value,lines:[{product_id:+$('#oProd').value,quantity:+$('#oQty').value}]})}));loadInv();loadOrders()}
+async function cancel(id){await api(`/orders/${id}/cancel`,{method:'POST'});loadInv();loadOrders()}
+async function adjust(){const b={delta:+$('#aDelta').value,reason:$('#aReason').value};if($('#aVer').value!=='')b.expected_version=+$('#aVer').value;
+ show('#aOut',await api(`/inventory/${$('#aStore').value}/${$('#aProd').value}/adjust`,{method:'POST',body:JSON.stringify(b)}));loadInv()}
+async function transfer(){show('#tOut',await api('/transfers',{method:'POST',body:JSON.stringify({from_store_id:+$('#tFrom').value,to_store_id:+$('#tTo').value,product_id:+$('#tProd').value,quantity:+$('#tQty').value})}));loadInv()}
+async function report(){show('#rOut',await api('/reports/reorder'))}async function integrity(){show('#rOut',await api('/integrity'))}
+init();
+</script></body></html>
