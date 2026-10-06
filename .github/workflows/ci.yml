@@ -1,27 +1,98 @@
 name: CI
+
 on:
   push:
   pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   test:
     runs-on: ubuntu-latest
     strategy:
+      fail-fast: false
       matrix:
-        python: ["3.11", "3.12"]
+        python: ["3.11", "3.12", "3.13"]
     steps:
       - uses: actions/checkout@v4
+
       - uses: actions/setup-python@v5
         with:
           python-version: ${{ matrix.python }}
-      - run: pip install -r requirements-dev.txt
-      - run: python -m pytest -q --cov=app --cov-report=term-missing
-      - name: Smoke-test the server
-        run: |
-          STOCKLINE_DB=/tmp/s.db uvicorn app.main:app --port 8765 & sleep 3
-          curl -sf http://localhost:8765/health
-          curl -sf http://localhost:8765/reports/reorder > /dev/null
+          cache: pip
+          cache-dependency-path: |
+            requirements.txt
+            requirements-dev.txt
+
+      # The static UI tests shell out to node (syntax checks + node --test), so node must
+      # be set up before pytest runs.
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Install dependencies
+        run: pip install -r requirements-dev.txt
+
+      - name: Lint (ruff)
+        run: python scripts/dev.py lint
+
+      - name: Tests with coverage gate
+        run: python scripts/dev.py cov
+
+      - name: UI library tests (node --test)
+        run: python scripts/dev.py node-test
+
+      - name: Smoke-test a real server
+        run: python scripts/dev.py smoke
+
+      - name: Build the static demo site
+        run: python scripts/dev.py site --out site
+
+      - name: Upload the site artifact
+        if: matrix.python == '3.12'
+        uses: actions/upload-artifact@v4
+        with:
+          name: site
+          path: site
+          if-no-files-found: error
+
   docker:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - run: docker build -t stockline .
+
+      - name: Build image
+        run: docker build -t stockline .
+
+      - name: Run container
+        run: docker run -d --name stockline -e STOCKLINE_SEED=1 -p 8000:8000 stockline
+
+      - name: Wait for /health (up to 30 s)
+        run: |
+          for _ in $(seq 1 60); do
+            if curl -sf http://localhost:8000/health; then
+              echo
+              exit 0
+            fi
+            sleep 0.5
+          done
+          echo "server did not become healthy within 30 s" >&2
+          exit 1
+
+      - name: Exercise the API
+        run: |
+          curl -sf http://localhost:8000/reports/summary > /dev/null
+          test "$(docker exec stockline id -u)" = "10001"
+
+      - name: Container logs
+        if: failure()
+        run: docker logs stockline
+
+      - name: Stop container
+        if: always()
+        run: docker rm -f stockline

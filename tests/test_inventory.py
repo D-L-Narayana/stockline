@@ -42,7 +42,7 @@ def test_low_stock_filter(seeded, client):
 def test_transfer_is_atomic(seeded, client):
     s1, s2, p = seeded["s1"]["id"], seeded["s2"]["id"], seeded["p1"]["id"]
     r = client.post("/transfers", json={"from_store_id": s1, "to_store_id": s2, "product_id": p, "quantity": 5})
-    assert r.status_code == 200
+    assert r.status_code == 201  # transfers are entities since 0.2.0 (PLAN §6)
     assert r.json()["from"]["on_hand"] == 15 and r.json()["to"]["on_hand"] == 5
     # insufficient -> 409, and nothing changes on either side
     r = client.post("/transfers", json={"from_store_id": s1, "to_store_id": s2, "product_id": p, "quantity": 100})

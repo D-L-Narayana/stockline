@@ -1,29 +1,47 @@
 name: Deploy demo
+
 on:
   push:
     branches: [main]
   workflow_dispatch:
+
 permissions:
   contents: read
   pages: write
   id-token: write
+
 concurrency: { group: pages, cancel-in-progress: true }
+
 jobs:
   build:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+
       - uses: actions/setup-python@v5
-        with: { python-version: "3.12" }
-      - run: pip install -r requirements-dev.txt && python -m pytest -q
-      - name: Assemble static site (UI + Python sources for the in-browser runtime)
-        run: |
-          mkdir -p site/app
-          cp public/index.html site/
-          cp app/__init__.py app/db.py app/schemas.py app/service.py app/seed.py app/bridge.py site/app/
-          touch site/.nojekyll
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: |
+            requirements.txt
+            requirements-dev.txt
+
+      # The static UI tests shell out to node.
+      - uses: actions/setup-node@v4
+        with: { node-version: "20" }
+
+      - name: Install dependencies
+        run: pip install -r requirements-dev.txt
+
+      - name: Tests
+        run: python scripts/dev.py test
+
+      - name: Assemble static site (UI + the Python modules the browser runtime loads)
+        run: python scripts/build_site.py --out site --sha "$GITHUB_SHA"
+
       - uses: actions/upload-pages-artifact@v3
         with: { path: site }
+
   deploy:
     needs: build
     runs-on: ubuntu-latest

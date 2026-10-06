@@ -1,18 +1,29 @@
-import os
+"""Shared fixtures: a hermetic temporary database per test and a tiny known catalogue.
+
+The pool is reset before the app starts and again after it stops, seeding is disabled so ``seeded``
+builds a small deterministic data set, and every ``STOCKLINE_*`` variable that would change middleware
+behaviour (API key, CORS, CSP override, HSTS, pool sizing) is cleared so a developer's shell never
+alters test results.
+"""
 import pytest
 from fastapi.testclient import TestClient
+
+ENV_RESET = ("STOCKLINE_API_KEY", "STOCKLINE_CORS_ORIGINS", "STOCKLINE_CSP", "STOCKLINE_HSTS", "STOCKLINE_POOL_SIZE", "STOCKLINE_POOL_TIMEOUT")
 
 
 @pytest.fixture()
 def client(tmp_path, monkeypatch):
+    for var in ENV_RESET:
+        monkeypatch.delenv(var, raising=False)
     monkeypatch.setenv("STOCKLINE_DB", str(tmp_path / "t.db"))
     monkeypatch.setenv("STOCKLINE_SEED", "0")
-    from app import main, db
-    main.reset_state()
-    db.DB_PATH = str(tmp_path / "t.db")
+    from app import db, main
+
+    monkeypatch.setattr(db, "DB_PATH", str(tmp_path / "t.db"))
+    main.reset_state(seed=False)
     with TestClient(main.app) as c:
         yield c
-    main.reset_state()
+    main.reset_state(seed=False)
 
 
 @pytest.fixture()

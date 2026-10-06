@@ -1,88 +1,406 @@
-<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>StockLine — Inventory API console</title>
-<style>
-:root{--red:#CC0000;--ink:#111827;--muted:#6b7280;--line:#e5e7eb}
-*{box-sizing:border-box}body{margin:0;font:15px/1.5 system-ui,sans-serif;color:var(--ink);background:#fafafa}
-header{background:var(--red);color:#fff;padding:22px 24px}h1{margin:0;font-size:24px}header p{margin:4px 0 0;opacity:.9}
-header a{color:#fff}main{max-width:1100px;margin:0 auto;padding:20px;display:grid;gap:18px;grid-template-columns:1fr 1fr}
-section{background:#fff;border:1px solid var(--line);border-radius:10px;padding:16px}h2{margin:0 0 8px;font-size:17px}
-.full{grid-column:1/-1}table{width:100%;border-collapse:collapse;font-size:13px}th,td{padding:5px 8px;border-bottom:1px solid var(--line);text-align:left}
-th{color:var(--muted)}.low{color:var(--red);font-weight:600}button{background:var(--red);color:#fff;border:0;border-radius:6px;padding:7px 12px;cursor:pointer;font-weight:600}
-button.sec{background:#374151}input,select{padding:6px 8px;border:1px solid var(--line);border-radius:6px;font:inherit}
-.row{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin:6px 0}pre{background:#0f172a;color:#e2e8f0;padding:10px;border-radius:8px;font-size:12px;overflow:auto;max-height:260px;margin:8px 0 0}
-.muted{color:var(--muted);font-size:13px}.mode{font-size:13px;background:rgba(0,0,0,.18);display:inline-block;padding:2px 8px;border-radius:6px;margin-top:8px!important}@media(max-width:800px){main{grid-template-columns:1fr}}
-</style></head><body>
-<header><h1>StockLine</h1><p>Multi-store inventory & order REST API · FastAPI + SQLite · <a href="docs" id="docsLink">OpenAPI docs</a> · <a href="https://github.com/D-L-Narayana/stockline">source</a></p><p id="mode" class="mode">connecting…</p></header>
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="color-scheme" content="light dark">
+  <meta name="description" content="StockLine — multi-store inventory and order API console">
+  <title>StockLine — Inventory API console</title>
+  <link rel="stylesheet" href="styles.css">
+  <link rel="icon" href="data:,">
+</head>
+<body>
+<header class="topbar">
+  <h1>StockLine</h1>
+  <p>Multi-store inventory &amp; order REST API · FastAPI + SQLite · <a href="docs" id="docs-link">OpenAPI docs</a> · <a href="https://github.com/D-L-Narayana/stockline" rel="noopener">source</a></p>
+  <p id="mode" class="mode" aria-live="polite">connecting…</p>
+</header>
+
+<nav class="tabs" aria-label="Views">
+  <div role="tablist" aria-label="Dashboard views">
+    <button type="button" role="tab" id="tab-inventory" data-action="tab" data-view="inventory" aria-selected="true" aria-controls="view-inventory">Inventory</button>
+    <button type="button" role="tab" id="tab-orders" data-action="tab" data-view="orders" aria-selected="false" aria-controls="view-orders" tabindex="-1">Orders</button>
+    <button type="button" role="tab" id="tab-transfers" data-action="tab" data-view="transfers" aria-selected="false" aria-controls="view-transfers" tabindex="-1">Transfers</button>
+    <button type="button" role="tab" id="tab-reports" data-action="tab" data-view="reports" aria-selected="false" aria-controls="view-reports" tabindex="-1">Reports</button>
+    <button type="button" role="tab" id="tab-catalog" data-action="tab" data-view="catalog" aria-selected="false" aria-controls="view-catalog" tabindex="-1">Catalog</button>
+    <button type="button" role="tab" id="tab-scenarios" data-action="tab" data-view="scenarios" aria-selected="false" aria-controls="view-scenarios" tabindex="-1">Scenarios</button>
+    <button type="button" role="tab" id="tab-console" data-action="tab" data-view="console" aria-selected="false" aria-controls="view-console" tabindex="-1">Console</button>
+  </div>
+</nav>
+
 <main>
-<section class="full"><h2>Inventory <span class="muted" id="invmeta"></span></h2>
-<div class="row"><label>Store <select id="storeSel"></select></label><label><input type="checkbox" id="lowOnly"> low stock only</label><button class="sec" onclick="loadInv()">Refresh</button></div>
-<div style="overflow:auto"><table id="inv"><thead><tr><th>Store</th><th>SKU</th><th>Product</th><th>On hand</th><th>Reorder pt</th><th>Version</th></tr></thead><tbody></tbody></table></div></section>
+  <!-- ============================================================ Inventory -->
+  <section id="view-inventory" class="view" role="tabpanel" aria-labelledby="tab-inventory">
+    <div class="card full">
+      <h2>Inventory <span class="muted" id="inv-meta"></span></h2>
+      <div class="toolbar">
+        <label for="inv-store">Store</label>
+        <select id="inv-store" data-change="inventory"></select>
+        <label><input type="checkbox" id="inv-low" data-change="inventory"> low stock only</label>
+        <label for="inv-q">Search</label>
+        <input type="search" id="inv-q" class="w-search" placeholder="SKU or name" maxlength="60" data-input="inventory">
+        <button type="button" class="sec" data-action="inv-refresh">Refresh</button>
+        <button type="button" class="sec" data-action="export-inventory">Export CSV</button>
+      </div>
+      <p class="muted">Click a row (or “ledger”) to open its movement history. Column headers sort.</p>
+      <div class="table-wrap">
+        <table id="inventory-table">
+          <thead>
+            <tr>
+              <th aria-sort="ascending"><button type="button" class="sort" data-action="inv-sort" data-key="store_code">Store</button></th>
+              <th aria-sort="none"><button type="button" class="sort" data-action="inv-sort" data-key="sku">SKU</button></th>
+              <th aria-sort="none"><button type="button" class="sort" data-action="inv-sort" data-key="name">Product</button></th>
+              <th class="num" aria-sort="none"><button type="button" class="sort" data-action="inv-sort" data-key="on_hand">On hand</button></th>
+              <th class="num" aria-sort="none"><button type="button" class="sort" data-action="inv-sort" data-key="reorder_point">Reorder pt</button></th>
+              <th class="num" aria-sort="none"><button type="button" class="sort" data-action="inv-sort" data-key="price_cents">Price</button></th>
+              <th class="num" aria-sort="none"><button type="button" class="sort" data-action="inv-sort" data-key="value_cents">Value</button></th>
+              <th class="num" aria-sort="none"><button type="button" class="sort" data-action="inv-sort" data-key="version">Version</button></th>
+              <th><span class="sr-only">Ledger</span></th>
+            </tr>
+          </thead>
+          <tbody></tbody>
+        </table>
+      </div>
+      <div id="inv-out" class="result" aria-live="polite"></div>
+    </div>
 
-<section><h2>Place order</h2><p class="muted">Stock is reserved atomically; the whole order is rejected (409) if any line is short. Send the same Idempotency-Key twice and you get the same order back.</p>
-<div class="row"><label>Store <select id="oStore"></select></label></div>
-<div class="row"><label>Product <select id="oProd"></select></label><label>Qty <input id="oQty" type="number" value="2" min="1" style="width:70px"></label></div>
-<div class="row"><label>Idempotency-Key <input id="oKey" placeholder="optional" style="width:160px"></label><button onclick="placeOrder()">POST /orders</button></div><pre id="oOut">—</pre></section>
+    <form class="card" id="receipt-form" data-form="receipt">
+      <h2>Receive delivery</h2>
+      <p class="muted">One all-or-nothing receipt with up to five lines (<code>POST /inventory/{store}/receipts</code>). Each line becomes a <code>receipt</code> movement carrying the reference.</p>
+      <div class="row">
+        <label for="receipt-store">Store</label>
+        <select id="receipt-store"></select>
+        <label for="receipt-ref">Reference</label>
+        <input id="receipt-ref" class="w-key" maxlength="64" placeholder="PO-2026-001" required>
+      </div>
+      <div id="receipt-lines" class="lines" data-lines="receipt"></div>
+      <div class="row">
+        <button type="button" class="sec" data-action="add-line" data-target="receipt-lines">Add line</button>
+        <button type="submit">POST receipt</button>
+      </div>
+      <div id="receipt-out" class="result" aria-live="polite"></div>
+    </form>
 
-<section><h2>Adjust stock</h2><p class="muted">Positive = receipt, negative = write-off. Pass <code>expected_version</code> to get a 409 on stale writes (optimistic locking).</p>
-<div class="row"><label>Store <select id="aStore"></select></label><label>Product <select id="aProd"></select></label></div>
-<div class="row"><label>Delta <input id="aDelta" type="number" value="10" style="width:80px"></label><label>Reason <select id="aReason"><option>receipt</option><option>adjustment</option><option>return</option></select></label><label>Expected version <input id="aVer" type="number" style="width:80px" placeholder="—"></label><button onclick="adjust()">POST /adjust</button></div><pre id="aOut">—</pre></section>
+    <form class="card" id="adjust-form" data-form="adjust">
+      <h2>Adjust stock</h2>
+      <p class="muted">Positive = receipt, negative = write-off. Pass <code>expected_version</code> to get a 409 on stale writes (optimistic locking).</p>
+      <div class="row">
+        <label for="adjust-store">Store</label>
+        <select id="adjust-store"></select>
+        <label for="adjust-product">Product</label>
+        <select id="adjust-product"></select>
+      </div>
+      <div class="row">
+        <label for="adjust-delta">Delta</label>
+        <input id="adjust-delta" type="number" value="10" required>
+        <label for="adjust-reason">Reason</label>
+        <select id="adjust-reason"><option>receipt</option><option>adjustment</option><option>return</option></select>
+        <label for="adjust-version">Expected version</label>
+        <input id="adjust-version" type="number" min="0" placeholder="—">
+        <button type="button" class="sec" data-action="adjust-fill-version">Use current</button>
+        <button type="submit">POST /adjust</button>
+      </div>
+      <div id="adjust-out" class="result" aria-live="polite"></div>
+    </form>
 
-<section><h2>Transfer between stores</h2>
-<div class="row"><label>From <select id="tFrom"></select></label><label>To <select id="tTo"></select></label></div>
-<div class="row"><label>Product <select id="tProd"></select></label><label>Qty <input id="tQty" type="number" value="3" style="width:70px"></label><button onclick="transfer()">POST /transfers</button></div><pre id="tOut">—</pre></section>
+    <aside id="drawer" class="drawer" hidden aria-labelledby="drawer-title">
+      <div class="drawer-head">
+        <div>
+          <h3 id="drawer-title">Stock movements</h3>
+          <p class="muted" id="drawer-sub"></p>
+        </div>
+        <button type="button" class="sec" id="drawer-close" data-action="drawer-close">Close</button>
+      </div>
+      <div class="table-wrap">
+        <table id="drawer-table">
+          <thead><tr><th>#</th><th class="num">Delta</th><th>Reason</th><th>Reference</th><th class="num">Balance after</th><th>Created</th></tr></thead>
+          <tbody></tbody>
+        </table>
+      </div>
+      <div class="row">
+        <button type="button" class="sec" id="drawer-older" data-action="movements-older">Older</button>
+        <button type="button" class="sec" data-action="export-movements">Export CSV</button>
+        <span class="muted" id="drawer-meta" aria-live="polite"></span>
+      </div>
+    </aside>
+  </section>
 
-<section><h2>Reorder report & ledger integrity</h2><div class="row"><button class="sec" onclick="report()">GET /reports/reorder</button><button class="sec" onclick="integrity()">GET /integrity</button></div><pre id="rOut">—</pre></section>
+  <!-- ============================================================ Orders -->
+  <section id="view-orders" class="view" role="tabpanel" aria-labelledby="tab-orders" hidden>
+    <div class="card full">
+      <h2>Orders <span class="muted" id="orders-meta"></span></h2>
+      <div class="toolbar">
+        <label for="order-status">Status</label>
+        <select id="order-status" data-change="orders">
+          <option value="">all</option><option value="placed">placed</option><option value="cancelled">cancelled</option><option value="fulfilled">fulfilled</option>
+        </select>
+        <label for="order-filter-store">Store</label>
+        <select id="order-filter-store" data-change="orders"></select>
+        <button type="button" class="sec" data-action="orders-refresh">Refresh</button>
+        <button type="button" class="sec" data-action="export-orders">Export CSV</button>
+        <span class="pager">
+          <button type="button" class="sec" id="orders-prev" data-action="orders-prev">Prev</button>
+          <span class="muted" id="orders-page"></span>
+          <button type="button" class="sec" id="orders-next" data-action="orders-next">Next</button>
+        </span>
+      </div>
+      <div class="table-wrap">
+        <table id="orders-table">
+          <thead><tr><th>#</th><th>Store</th><th>Status</th><th class="num">Total</th><th>Lines</th><th>Key</th><th>Created</th><th>Updated</th><th>Actions</th></tr></thead>
+          <tbody></tbody>
+        </table>
+      </div>
+      <div id="orders-out" class="result" aria-live="polite"></div>
+    </div>
 
-<section class="full"><h2>Recent orders</h2><div style="overflow:auto"><table id="orders"><thead><tr><th>#</th><th>Store</th><th>Status</th><th>Total</th><th>Lines</th><th>Key</th><th></th></tr></thead><tbody></tbody></table></div></section>
+    <form class="card full" id="order-form" data-form="order">
+      <h2>Place order</h2>
+      <p class="muted">Stock is reserved atomically; the whole order is rejected (409 <code>insufficient_stock</code>) if any line is short. Send the same <code>Idempotency-Key</code> twice and you get the same order back (200 + <code>Idempotent-Replayed: true</code>).</p>
+      <div class="row">
+        <label for="order-store">Store</label>
+        <select id="order-store"></select>
+      </div>
+      <div id="order-lines" class="lines" data-lines="order"></div>
+      <div class="row">
+        <button type="button" class="sec" data-action="add-line" data-target="order-lines">Add line</button>
+        <label for="order-key">Idempotency-Key</label>
+        <input id="order-key" class="w-key" maxlength="64" placeholder="optional">
+        <button type="button" class="sec" data-action="generate-key" data-target="order-key">Generate</button>
+        <button type="submit">POST /orders</button>
+      </div>
+      <div id="order-out" class="result" aria-live="polite"></div>
+    </form>
+  </section>
+
+  <!-- ============================================================ Transfers -->
+  <section id="view-transfers" class="view" role="tabpanel" aria-labelledby="tab-transfers" hidden>
+    <form class="card" id="transfer-form" data-form="transfer">
+      <h2>Transfer between stores</h2>
+      <p class="muted">Two ledger entries in one transaction (<code>transfer_out</code> + <code>transfer_in</code>); a 409 leaves both sides untouched. An optional <code>Idempotency-Key</code> makes retries safe.</p>
+      <div class="row">
+        <label for="transfer-from">From</label>
+        <select id="transfer-from"></select>
+        <label for="transfer-to">To</label>
+        <select id="transfer-to"></select>
+      </div>
+      <div class="row">
+        <label for="transfer-product">Product</label>
+        <select id="transfer-product"></select>
+        <label for="transfer-qty">Qty</label>
+        <input id="transfer-qty" type="number" min="1" value="3" required>
+      </div>
+      <div class="row">
+        <label for="transfer-key">Idempotency-Key</label>
+        <input id="transfer-key" class="w-key" maxlength="64" placeholder="optional">
+        <button type="button" class="sec" data-action="generate-key" data-target="transfer-key">Generate</button>
+        <button type="submit">POST /transfers</button>
+      </div>
+      <div id="transfer-out" class="result" aria-live="polite"></div>
+    </form>
+
+    <div class="card">
+      <h2>Recent transfers <span class="muted" id="transfers-meta"></span></h2>
+      <div class="toolbar"><button type="button" class="sec" data-action="transfers-refresh">Refresh</button></div>
+      <div class="table-wrap">
+        <table id="transfers-table">
+          <thead><tr><th>#</th><th>From → To</th><th>SKU</th><th class="num">Qty</th><th>Key</th><th>Created</th></tr></thead>
+          <tbody></tbody>
+        </table>
+      </div>
+      <div id="transfers-out" class="result" aria-live="polite"></div>
+    </div>
+  </section>
+
+  <!-- ============================================================ Reports -->
+  <section id="view-reports" class="view" role="tabpanel" aria-labelledby="tab-reports" hidden>
+    <div class="card full">
+      <h2>Summary <span class="muted" id="summary-meta"></span></h2>
+      <div class="toolbar"><button type="button" class="sec" data-action="load-summary">Refresh</button></div>
+      <div id="summary-cards" class="cards"></div>
+      <div class="table-wrap">
+        <table id="summary-table">
+          <thead><tr><th>Store</th><th>Name</th><th class="num">SKUs</th><th class="num">Units</th><th class="num">Value</th><th class="num">Low stock</th><th>Above reorder point</th></tr></thead>
+          <tbody></tbody>
+        </table>
+      </div>
+      <div id="summary-out" class="result" aria-live="polite"></div>
+    </div>
+
+    <div class="card full">
+      <h2>Reorder report <span class="muted" id="reorder-meta"></span></h2>
+      <div class="toolbar">
+        <label for="reorder-days">Window</label>
+        <select id="reorder-days" data-change="reorder">
+          <option value="7">7 days</option><option value="14">14 days</option><option value="30" selected>30 days</option><option value="90">90 days</option>
+        </select>
+        <label for="reorder-store">Store</label>
+        <select id="reorder-store" data-change="reorder"></select>
+        <button type="button" class="sec" data-action="load-reorder">Refresh</button>
+        <button type="button" class="sec" data-action="export-reorder">Export CSV</button>
+      </div>
+      <div class="table-wrap">
+        <table id="reorder-table">
+          <thead><tr><th>Store</th><th>SKU</th><th>Product</th><th class="num">On hand</th><th class="num">Reorder pt</th><th class="num">Sold</th><th class="num">Returned</th><th class="num">Net</th><th class="num">Per day</th><th class="num">Days of cover</th><th class="num">Suggested qty</th></tr></thead>
+          <tbody></tbody>
+        </table>
+      </div>
+      <div id="reorder-out" class="result" aria-live="polite"></div>
+    </div>
+
+    <div class="card">
+      <h2>Sales <span class="muted" id="sales-meta"></span></h2>
+      <div class="toolbar">
+        <label for="sales-days">Window</label>
+        <select id="sales-days" data-change="sales">
+          <option value="7">7 days</option><option value="14">14 days</option><option value="30" selected>30 days</option><option value="90">90 days</option>
+        </select>
+        <button type="button" class="sec" data-action="load-sales">Refresh</button>
+      </div>
+      <div id="sales-chart"></div>
+      <div id="sales-out" class="result" aria-live="polite"></div>
+    </div>
+
+    <div class="card">
+      <h2>Top products</h2>
+      <div class="table-wrap">
+        <table id="sales-products-table">
+          <thead><tr><th>SKU</th><th>Product</th><th class="num">Orders</th><th class="num">Units</th><th class="num">Revenue</th></tr></thead>
+          <tbody></tbody>
+        </table>
+      </div>
+    </div>
+
+    <div class="card full">
+      <h2>Ledger integrity</h2>
+      <p class="muted"><code>GET /integrity</code> compares every cached balance with the ledger sum and checks <code>balance_after</code> chains and order totals; <code>POST /integrity/rebuild</code> repairs the cache from the ledger.</p>
+      <div class="toolbar">
+        <button type="button" class="sec" data-action="integrity">GET /integrity</button>
+        <button type="button" class="sec" data-action="integrity-rebuild">POST /integrity/rebuild</button>
+      </div>
+      <div id="integrity-out" class="result" aria-live="polite"></div>
+    </div>
+  </section>
+
+  <!-- ============================================================ Catalog -->
+  <section id="view-catalog" class="view" role="tabpanel" aria-labelledby="tab-catalog" hidden>
+    <div class="card full">
+      <h2>Products <span class="muted" id="products-meta"></span></h2>
+      <div class="toolbar">
+        <label for="catalog-q">Search</label>
+        <input type="search" id="catalog-q" class="w-search" placeholder="SKU or name" maxlength="60" data-input="products">
+        <label><input type="checkbox" id="catalog-inactive" data-change="products"> include inactive</label>
+        <button type="button" class="sec" data-action="products-refresh">Refresh</button>
+      </div>
+      <div class="table-wrap">
+        <table id="products-table">
+          <thead><tr><th>#</th><th>SKU</th><th>Name</th><th>Category</th><th class="num">Price</th><th class="num">Reorder pt</th><th>Active</th><th>Actions</th></tr></thead>
+          <tbody></tbody>
+        </table>
+      </div>
+      <div id="products-out" class="result" aria-live="polite"></div>
+    </div>
+
+    <form class="card" id="product-form" data-form="product">
+      <h2>Create product</h2>
+      <div class="row">
+        <label for="product-sku">SKU</label>
+        <input id="product-sku" required minlength="3" maxlength="32" pattern="[A-Z0-9\-]+" placeholder="GRO-TEA-250G">
+        <label for="product-name">Name</label>
+        <input id="product-name" required maxlength="120" placeholder="Assam Tea 250 g">
+      </div>
+      <div class="row">
+        <label for="product-category">Category</label>
+        <input id="product-category" required maxlength="40" value="Grocery">
+        <label for="product-price">Price (cents)</label>
+        <input id="product-price" type="number" min="0" value="9900" required>
+        <label for="product-reorder">Reorder pt</label>
+        <input id="product-reorder" type="number" min="0" value="10" required>
+      </div>
+      <div class="row"><button type="submit">POST /products</button></div>
+      <div id="product-out" class="result" aria-live="polite"></div>
+    </form>
+
+    <div class="card">
+      <h2>Stores</h2>
+      <div class="table-wrap">
+        <table id="stores-table">
+          <thead><tr><th>#</th><th>Code</th><th>Name</th><th>Region</th><th>Actions</th></tr></thead>
+          <tbody></tbody>
+        </table>
+      </div>
+      <form id="store-form" data-form="store">
+        <h3>Create store</h3>
+        <div class="row">
+          <label for="store-code">Code</label>
+          <input id="store-code" required minlength="2" maxlength="16" pattern="[A-Z0-9_\-]+" placeholder="PUN-01">
+          <label for="store-name">Name</label>
+          <input id="store-name" required maxlength="80" placeholder="Pune Hinjewadi">
+          <label for="store-region">Region</label>
+          <input id="store-region" required maxlength="40" value="West">
+          <button type="submit">POST /stores</button>
+        </div>
+      </form>
+      <div id="stores-out" class="result" aria-live="polite"></div>
+    </div>
+  </section>
+
+  <!-- ============================================================ Scenarios -->
+  <section id="view-scenarios" class="view" role="tabpanel" aria-labelledby="tab-scenarios" hidden>
+    <div class="card full">
+      <h2>Guided scenarios</h2>
+      <p class="muted">Each button runs real requests against the API you are connected to and checks every step against the expected status and error code. Writes land in the demo database; the scenarios undo their own changes where they can.</p>
+      <div class="toolbar"><button type="button" class="sec" data-action="run-all-scenarios">Run all</button></div>
+    </div>
+
+    <article class="card">
+      <div class="scenario-head"><h2>1 · Oversell is rejected</h2><button type="button" data-action="run-scenario" data-scenario="oversell">Run</button></div>
+      <p class="muted">Order one more unit than is on hand → <code>409 insufficient_stock</code>; the balance stays unchanged.</p>
+      <div id="scenario-oversell" class="scenario" aria-live="polite"></div>
+    </article>
+
+    <article class="card">
+      <div class="scenario-head"><h2>2 · Idempotent retry</h2><button type="button" data-action="run-scenario" data-scenario="idempotent">Run</button></div>
+      <p class="muted">Same <code>Idempotency-Key</code> twice → 201 then 200 + <code>Idempotent-Replayed: true</code>; the same key with a different body → <code>422 idempotency_key_reuse</code>.</p>
+      <div id="scenario-idempotent" class="scenario" aria-live="polite"></div>
+    </article>
+
+    <article class="card">
+      <div class="scenario-head"><h2>3 · Stale version</h2><button type="button" data-action="run-scenario" data-scenario="stale">Run</button></div>
+      <p class="muted">Adjust with an <code>expected_version</code> one behind → <code>409 version_conflict</code>; with the current version → 200.</p>
+      <div id="scenario-stale" class="scenario" aria-live="polite"></div>
+    </article>
+
+    <article class="card">
+      <div class="scenario-head"><h2>4 · Atomic transfer</h2><button type="button" data-action="run-scenario" data-scenario="transfer">Run</button></div>
+      <p class="muted">Transfer more than is on hand → 409 and both stores unchanged; a one-unit transfer succeeds (201) and is moved back.</p>
+      <div id="scenario-transfer" class="scenario" aria-live="polite"></div>
+    </article>
+
+    <article class="card">
+      <div class="scenario-head"><h2>5 · Audit</h2><button type="button" data-action="run-scenario" data-scenario="audit">Run</button></div>
+      <p class="muted"><code>GET /integrity</code> reports <code>ok: true</code>; the movement feed shows the latest ledger rows with <code>balance_after</code>.</p>
+      <div id="scenario-audit" class="scenario" aria-live="polite"></div>
+    </article>
+  </section>
+
+  <!-- ============================================================ Console -->
+  <section id="view-console" class="view" role="tabpanel" aria-labelledby="tab-console" hidden>
+    <div class="card full">
+      <h2>Request console <span class="muted" id="console-meta"></span></h2>
+      <p class="muted">Every request this page made, newest first. “Copy as curl” copies the request and prints it below so it can be replayed against the server.</p>
+      <div class="toolbar"><button type="button" class="sec" data-action="console-clear">Clear</button></div>
+      <pre id="console-curl" class="out" hidden aria-live="polite"></pre>
+      <div class="table-wrap">
+        <table id="console-table">
+          <thead><tr><th>Time</th><th>Method</th><th>Path</th><th>Status</th><th class="num">ms</th><th>Replayed</th><th>Actions</th></tr></thead>
+          <tbody></tbody>
+        </table>
+      </div>
+    </div>
+  </section>
 </main>
-<script>
-const $=s=>document.querySelector(s);let stores=[],products=[];
-const money=c=>'₹'+(c/100).toLocaleString('en-IN',{minimumFractionDigits:2});
-let backend=null; // 'server' | 'pyodide'
-const PY_FILES=['__init__.py','db.py','schemas.py','service.py','seed.py','bridge.py'];
-async function bootPyodide(){
- $('#mode').textContent='No server found — loading Python runtime in your browser (Pyodide, ~10 MB)…';
- await new Promise((res,rej)=>{const s=document.createElement('script');s.src='https://cdn.jsdelivr.net/pyodide/v0.27.5/full/pyodide.js';s.onload=res;s.onerror=rej;document.head.appendChild(s)});
- const py=await loadPyodide({indexURL:'https://cdn.jsdelivr.net/pyodide/v0.27.5/full/'});
- await py.loadPackage(['pydantic','sqlite3']);
- py.FS.mkdir('/app');
- for(const f of PY_FILES){const src=await (await fetch('app/'+f)).text();py.FS.writeFile('/app/'+f,src)}
- py.runPython(`import sys, os
-os.environ['STOCKLINE_DB']='/stockline.db'
-sys.path.insert(0,'/')
-from app import bridge`);
- window.__py=py;window.__handle=py.runPython('bridge.handle_json');
- $('#mode').innerHTML='Running <b>in-browser</b>: the same Python service layer (SQLite ledger, idempotency, optimistic locking) executes via Pyodide. State resets on reload. Run <code>uvicorn app.main:app</code> for the real FastAPI server.';
- $('#docsLink').href='https://github.com/D-L-Narayana/stockline#api';
-}
-async function detect(){
- try{const r=await fetch('health',{cache:'no-store'});if(r.ok&&(await r.json()).status==='ok'){backend='server';$('#mode').textContent='Connected to FastAPI server';return}}catch{}
- await bootPyodide();backend='pyodide';
-}
-async function api(path,opt={}){
- const t0=performance.now();
- if(backend==='pyodide'){
-  const res=JSON.parse(window.__handle(opt.method||'GET',path,opt.body||null,JSON.stringify(opt.headers||{})));
-  return{status:res.status,replayed:res.headers['Idempotent-Replayed']||null,ms:(performance.now()-t0).toFixed(1),body:res.body}
- }
- const r=await fetch(path.replace(/^\//,''),{headers:{'content-type':'application/json',...(opt.headers||{})},...opt});let j;try{j=await r.json()}catch{j={}}
- return{status:r.status,replayed:r.headers.get('Idempotent-Replayed'),ms:r.headers.get('X-Response-Time-ms'),body:j}}
-const show=(el,res)=>$(el).textContent=`HTTP ${res.status}${res.replayed?'  Idempotent-Replayed: '+res.replayed:''}  (${res.ms} ms)\n`+JSON.stringify(res.body,null,1);
-function fill(sel,items,label){sel.innerHTML=items.map(i=>`<option value="${i.id}">${label(i)}</option>`).join('')}
-async function init(){await detect();stores=(await api('/stores')).body;products=(await api('/products?limit=100')).body.items;
- for(const id of['storeSel','oStore','aStore','tFrom','tTo'])fill($('#'+id),stores,s=>s.code);
- $('#storeSel').insertAdjacentHTML('afterbegin','<option value="">all</option>');$('#storeSel').value='';$('#tTo').selectedIndex=1;
- for(const id of['oProd','aProd','tProd'])fill($('#'+id),products,p=>`${p.sku} — ${money(p.price_cents)}`);loadInv();loadOrders()}
-async function loadInv(){const s=$('#storeSel').value;const r=await api(`/inventory?limit=200${s?'&store_id='+s:''}${$('#lowOnly').checked?'&low_stock=true':''}`);
- $('#invmeta').textContent=`(${r.body.total} rows · ${r.ms} ms)`;
- $('#inv tbody').innerHTML=r.body.items.map(i=>`<tr><td>${i.store_code}</td><td>${i.sku}</td><td>${i.name}</td><td class="${i.below_reorder?'low':''}">${i.on_hand}</td><td>${i.reorder_point}</td><td>${i.version}</td></tr>`).join('')}
-async function loadOrders(){const r=await api('/orders?limit=10');$('#orders tbody').innerHTML=r.body.items.map(o=>`<tr><td>${o.id}</td><td>${(stores.find(s=>s.id===o.store_id)||{}).code||o.store_id}</td><td>${o.status}</td><td>${money(o.total_cents)}</td><td>${o.lines.map(l=>l.sku+'×'+l.quantity).join(', ')}</td><td>${o.idempotency_key||''}</td><td>${o.status==='placed'?`<button class="sec" onclick="cancel(${o.id})">cancel</button>`:''}</td></tr>`).join('')}
-async function placeOrder(){const h={};if($('#oKey').value)h['Idempotency-Key']=$('#oKey').value;
- show('#oOut',await api('/orders',{method:'POST',headers:h,body:JSON.stringify({store_id:+$('#oStore').value,lines:[{product_id:+$('#oProd').value,quantity:+$('#oQty').value}]})}));loadInv();loadOrders()}
-async function cancel(id){await api(`/orders/${id}/cancel`,{method:'POST'});loadInv();loadOrders()}
-async function adjust(){const b={delta:+$('#aDelta').value,reason:$('#aReason').value};if($('#aVer').value!=='')b.expected_version=+$('#aVer').value;
- show('#aOut',await api(`/inventory/${$('#aStore').value}/${$('#aProd').value}/adjust`,{method:'POST',body:JSON.stringify(b)}));loadInv()}
-async function transfer(){show('#tOut',await api('/transfers',{method:'POST',body:JSON.stringify({from_store_id:+$('#tFrom').value,to_store_id:+$('#tTo').value,product_id:+$('#tProd').value,quantity:+$('#tQty').value})}));loadInv()}
-async function report(){show('#rOut',await api('/reports/reorder'))}async function integrity(){show('#rOut',await api('/integrity'))}
-init();
-</script></body></html>
+
+<div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
+<script type="module" src="app.js"></script>
+</body>
+</html>

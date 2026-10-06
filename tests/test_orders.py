@@ -1,3 +1,9 @@
+"""Order flows against the assembled application (``client`` / ``seeded`` fixtures from ``conftest.py``).
+
+These are the v0.1 behaviours that must keep working unchanged. The v0.2 additions — fingerprinted
+idempotency, ``updated_at``, inactive-product semantics, the CSV export, typed pages without an N+1 —
+are covered on a private router app in ``test_orders_router.py`` and ``test_idempotency.py``.
+"""
 import threading
 
 
@@ -77,15 +83,10 @@ def test_concurrent_orders_never_oversell(seeded, client):
         results.append(r.status_code)
 
     threads = [threading.Thread(target=buy) for _ in range(20)]
-    for t in threads: t.start()
-    for t in threads: t.join()
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
     assert results.count(201) == 10 and results.count(409) == 10
     assert client.get(f"/inventory/{s}/{p}").json()["on_hand"] == 0
     assert client.get("/integrity").json()["ok"] is True
-
-
-def test_reorder_report(seeded, client):
-    s, p2 = seeded["s1"]["id"], seeded["p2"]["id"]
-    client.post("/orders", json={"store_id": s, "lines": [{"product_id": p2, "quantity": 2}]})  # 3 -> 1 (<= 2)
-    rep = client.get("/reports/reorder").json()
-    assert len(rep) == 1 and rep[0]["sku"] == "SKU-2" and rep[0]["sold_30d"] == 2 and rep[0]["suggested_qty"] >= 2

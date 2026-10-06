@@ -1,0 +1,34 @@
+# docker compose up --build   ->  http://localhost:8000  (dashboard, /docs, /health, /metrics)
+#
+# Data lives in the named volume `stockline-data`, mounted at /data and owned by the
+# non-root application user.  Variables with `${VAR:-default}` take the value from your
+# shell (or a .env file next to this file) and fall back to the default; the bare keys are
+# pass-through only: they reach the container when set in your shell and stay unset
+# otherwise (unset = feature off).
+services:
+  stockline:
+    build: .
+    image: stockline
+    ports:
+      - "8000:8000"
+    volumes:
+      - stockline-data:/data
+    environment:
+      STOCKLINE_SEED: ${STOCKLINE_SEED:-1}                 # 1 = load the demo dataset on first start
+      STOCKLINE_LOG_LEVEL: ${STOCKLINE_LOG_LEVEL:-INFO}
+      STOCKLINE_LOG_FORMAT: ${STOCKLINE_LOG_FORMAT:-json}  # json | text
+      STOCKLINE_HSTS: ${STOCKLINE_HSTS:-0}                 # 1 = send Strict-Transport-Security (behind TLS only)
+      STOCKLINE_POOL_SIZE: ${STOCKLINE_POOL_SIZE:-8}
+      STOCKLINE_API_KEY:                                   # protects POST/PUT/PATCH/DELETE when set
+      STOCKLINE_CORS_ORIGINS:                              # comma-separated allowed origins
+      STOCKLINE_CSP:                                       # verbatim Content-Security-Policy override
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request;urllib.request.urlopen('http://127.0.0.1:'+__import__('os').environ.get('PORT','8000')+'/health')"]
+      interval: 30s
+      timeout: 3s
+      start_period: 5s
+      retries: 3
+
+volumes:
+  stockline-data:

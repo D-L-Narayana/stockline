@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from typing import Literal
+
 from pydantic import BaseModel, Field, field_validator
 
 
@@ -72,7 +73,7 @@ class OrderIn(BaseModel):
     @field_validator("lines")
     @classmethod
     def unique_products(cls, v: list[OrderLineIn]) -> list[OrderLineIn]:
-        ids = [l.product_id for l in v]
+        ids = [line.product_id for line in v]
         if len(ids) != len(set(ids)):
             raise ValueError("duplicate product_id in lines")
         return v

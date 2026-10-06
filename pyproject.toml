@@ -1,3 +1,54 @@
+[project]
+name = "stockline"
+version = "0.2.0"
+description = "Multi-store inventory & order API: SQLite ledger, idempotent orders, optimistic locking, browser-runnable service layer."
+readme = "README.md"
+license = { text = "MIT" }
+requires-python = ">=3.11"
+dependencies = [
+    "fastapi>=0.115",
+    "uvicorn[standard]>=0.30",
+    "pydantic>=2.7",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8",
+    "pytest-cov",
+    "httpx>=0.27",
+    "ruff>=0.5",
+]
+
+[project.urls]
+Source = "https://github.com/D-L-Narayana/stockline"
+Demo = "https://d-l-narayana.github.io/stockline/"
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-filterwarnings = ["ignore::DeprecationWarning"]
+filterwarnings = [
+    "ignore::DeprecationWarning",
+    # Starlette >= 1.7 prefers the httpx2 package for its TestClient; classic httpx keeps working.
+    "ignore:Using .httpx. with .starlette.testclient. is deprecated:UserWarning",
+]
+
+[tool.coverage.run]
+source = ["app"]
+branch = false
+
+[tool.coverage.report]
+fail_under = 90
+show_missing = true
+skip_covered = false
+
+[tool.ruff]
+line-length = 150
+target-version = "py311"
+extend-exclude = [".venv", "site"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "UP"]
+# E501: line length is advisory at 150; B008: FastAPI's `Depends()` in parameter defaults is idiomatic.
+ignore = ["E501", "B008"]
+
+[tool.ruff.lint.isort]
+known-first-party = ["app"]

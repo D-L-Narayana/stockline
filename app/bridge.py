@@ -1,144 +1,201 @@
 """Framework-free request router used by the browser demo (Pyodide).
 
-It mirrors the FastAPI routes in ``main.py`` one-to-one but talks to the
-service layer directly, so the GitHub Pages demo executes the *same* Python
-business logic (ledger, idempotency, optimistic locking) as the real server.
-Kept intentionally tiny: parse -> validate with pydantic -> call service.
+The GitHub Pages demo ships the service layer unchanged and drives it through ``handle_json`` instead
+of HTTP, so the browser runs the very same ledger, idempotency and locking code as the server. The
+route table is not written by hand: ``ROUTES`` aggregates the system routes defined here with the
+``BRIDGE_ROUTES`` every domain module publishes (``catalog``, ``inventory``, ``orders``, ``reports``),
+compiled once at import. The parity tests keep this table and the FastAPI routers identical.
+
+Contract
+--------
+* ``handle(method, url, body=None, headers=None)`` → ``{"status", "headers", "body"}``. ``body`` is the
+  handler's JSON-able result, ``None`` for a 204, or the raw ``str`` of a CSV export together with the
+  ``Content-Type`` / ``Content-Disposition`` / ``X-Row-Count`` headers the handler set. Only
+  ``handle_json`` (the JavaScript entry point) JSON-encodes the envelope.
+* Path and method match → handler. Path match with another method → 405 ``method_not_allowed`` with an
+  ``Allow`` header listing every method the path accepts. No match → 404 ``not_found``.
+* ``ServiceError`` → its status and ``{"detail", "code"}``; pydantic ``ValidationError`` and malformed
+  JSON → 422 ``validation_error`` with the same error-list shape as the server; any other exception →
+  500 ``internal`` (logged, transaction rolled back, connection kept usable).
+* One shared connection (``get_conn()`` / ``_conn``), migrated and seeded on first use.
+
+This module stays importable without FastAPI, Starlette or uvicorn and never imports the server-only
+modules (``deps``, ``observability``, ``security``, ``main``) — it is listed in ``common.BROWSER_MODULES``.
 """
 from __future__ import annotations
 
 import json
+import logging
 import re
 import sqlite3
+import time
 from typing import Any
 from urllib.parse import parse_qs, urlsplit
 
 from pydantic import ValidationError
 
-from . import __version__, db, schemas, service
+from . import __version__, catalog, db, inventory, ledger, orders, reports
+from .common import INTERNAL, METHOD_NOT_ALLOWED, NOT_FOUND, VALIDATION, BridgeCall, BridgeHandler, BridgeRoute, ServiceError
 from .seed import seed
 
+RUNTIME = "pyodide"
+INTERNAL_ERROR_DETAIL = "internal error"
+METHOD_NOT_ALLOWED_DETAIL = "method not allowed"
+
+logger = logging.getLogger("stockline.bridge")
+_STARTED = time.monotonic()
 _conn: sqlite3.Connection | None = None
 
 
+# --------------------------------------------------------------------------- connection
 def get_conn() -> sqlite3.Connection:
+    """The demo's single shared connection: opened lazily from ``db.DB_PATH``, migrated and seeded on first use.
+
+    Tests reset ``bridge._conn = None`` (after re-pointing ``db.DB_PATH``) to start from a fresh database.
+    """
     global _conn
     if _conn is None:
-        _conn = db.connect()
-        db.init_schema(_conn)
-        seed(_conn)
+        conn = db.connect()
+        try:
+            db.init_schema(conn)
+            seed(conn)
+        except BaseException:
+            conn.close()
+            raise
+        _conn = conn
     return _conn
 
 
-def _q(qs: dict[str, list[str]], key: str, default: Any = None, cast=str):
-    if key not in qs:
-        return default
-    v = qs[key][0]
-    if cast is bool:
-        return v.lower() in ("1", "true", "yes")
-    return cast(v)
+# --------------------------------------------------------------------------- system routes
+def uptime_s() -> float:
+    """Seconds since this module was imported, one decimal place (mirrors the server's ``/health``)."""
+    return round(time.monotonic() - _STARTED, 1)
 
 
-def _page(items, total, limit, offset):
-    return {"items": items, "total": total, "limit": limit, "offset": offset}
+def _health(call: BridgeCall) -> tuple[int, dict]:
+    call.conn.execute("SELECT 1")
+    return 200, {
+        "status": "ok",
+        "version": __version__,
+        "schema_version": db.schema_version(call.conn),
+        "runtime": RUNTIME,
+        "uptime_s": uptime_s(),
+    }
 
 
-ROUTES: list[tuple[str, re.Pattern[str], str]] = [
-    ("GET", re.compile(r"^/health$"), "health"),
-    ("GET", re.compile(r"^/integrity$"), "integrity"),
-    ("GET", re.compile(r"^/stores$"), "list_stores"),
-    ("POST", re.compile(r"^/stores$"), "create_store"),
-    ("GET", re.compile(r"^/products$"), "list_products"),
-    ("POST", re.compile(r"^/products$"), "create_product"),
-    ("GET", re.compile(r"^/products/(?P<product_id>\d+)$"), "get_product"),
-    ("GET", re.compile(r"^/inventory$"), "list_inventory"),
-    ("GET", re.compile(r"^/inventory/(?P<store_id>\d+)/(?P<product_id>\d+)$"), "get_inventory"),
-    ("POST", re.compile(r"^/inventory/(?P<store_id>\d+)/(?P<product_id>\d+)/adjust$"), "adjust"),
-    ("GET", re.compile(r"^/inventory/(?P<store_id>\d+)/(?P<product_id>\d+)/movements$"), "movements"),
-    ("POST", re.compile(r"^/transfers$"), "transfer"),
-    ("GET", re.compile(r"^/orders$"), "list_orders"),
-    ("POST", re.compile(r"^/orders$"), "place_order"),
-    ("GET", re.compile(r"^/orders/(?P<order_id>\d+)$"), "get_order"),
-    ("POST", re.compile(r"^/orders/(?P<order_id>\d+)/cancel$"), "cancel_order"),
-    ("POST", re.compile(r"^/orders/(?P<order_id>\d+)/fulfil$"), "fulfil_order"),
-    ("GET", re.compile(r"^/reports/reorder$"), "reorder"),
+def _integrity(call: BridgeCall) -> tuple[int, dict]:
+    return 200, ledger.ledger_integrity(call.conn)
+
+
+def _rebuild(call: BridgeCall) -> tuple[int, dict]:
+    return 200, ledger.rebuild_balances(call.conn)
+
+
+SYSTEM_ROUTES: list[BridgeRoute] = [
+    ("GET", r"^/health$", _health),
+    ("GET", r"^/integrity$", _integrity),
+    ("POST", r"^/integrity/rebuild$", _rebuild),
 ]
 
+# The complete table, in declaration order (literal paths precede parameterised ones within each module).
+ROUTE_TABLE: list[BridgeRoute] = SYSTEM_ROUTES + catalog.BRIDGE_ROUTES + inventory.BRIDGE_ROUTES + orders.BRIDGE_ROUTES + reports.BRIDGE_ROUTES
+ROUTES: list[tuple[str, re.Pattern[str], BridgeHandler]] = [(method, re.compile(pattern), handler) for method, pattern, handler in ROUTE_TABLE]
 
+
+# --------------------------------------------------------------------------- request plumbing
+def _match(method: str, path: str) -> tuple[BridgeHandler | None, dict[str, int], set[str]]:
+    """Find the handler for ``method`` + ``path``; also returns the methods of every route whose path matched (405 ``Allow``)."""
+    allowed: set[str] = set()
+    for route_method, pattern, handler in ROUTES:
+        found = pattern.match(path)
+        if found is None:
+            continue
+        allowed.add(route_method)
+        if route_method == method:
+            return handler, {name: int(value) for name, value in found.groupdict().items()}, allowed
+    return None, {}, allowed
+
+
+def _parse_body(body: Any) -> Any:
+    """Parsed JSON body; ``{}`` when there is none. Raises ``json.JSONDecodeError`` for malformed text."""
+    if body is None or body == "" or body == b"":
+        return {}
+    if isinstance(body, bytes):
+        body = body.decode("utf-8", errors="replace")
+    if not isinstance(body, str):
+        return body  # already-parsed data from a Python caller
+    return json.loads(body)
+
+
+def _validation_detail(exc: ValidationError) -> list[dict]:
+    """pydantic errors in the server's shape: ``loc`` prefixed with ``body``, no documentation ``url``, JSON-safe ``ctx``."""
+    return [{**err, "loc": ["body", *err.get("loc", [])]} for err in json.loads(exc.json(include_url=False))]
+
+
+def _json_invalid_detail(exc: json.JSONDecodeError) -> list[dict]:
+    """Malformed request JSON, shaped like FastAPI's ``json_invalid`` error."""
+    return [{"type": "json_invalid", "loc": ["body", exc.pos], "msg": "JSON decode error", "input": {}, "ctx": {"error": exc.msg}}]
+
+
+def _reply(status: int, body: Any, headers: dict[str, str]) -> dict:
+    return {"status": status, "headers": headers, "body": body}
+
+
+def _rollback(conn: sqlite3.Connection) -> None:
+    """Leave the shared connection clean after a failed handler."""
+    try:
+        if conn.in_transaction:
+            conn.execute("ROLLBACK")
+    except sqlite3.Error:
+        logger.warning("rollback after a failed bridge request did not succeed", exc_info=True)
+
+
+# --------------------------------------------------------------------------- entry points
 def handle(method: str, url: str, body: str | None = None, headers: dict[str, str] | None = None) -> dict:
-    """Return {"status": int, "headers": {...}, "body": <json-able>}."""
-    headers = {k.lower(): v for k, v in (headers or {}).items()}
+    """Dispatch one request and return ``{"status": int, "headers": {...}, "body": <json-able | str | None>}``.
+
+    ``url`` is a path with an optional query string (a missing leading slash or a trailing slash is
+    tolerated); only the first value of a repeated query key is used. ``headers`` keys are matched
+    case-insensitively. CSV export bodies are returned as ``str`` exactly as the handler produced them.
+    """
+    verb = method.upper()
     parts = urlsplit(url)
-    path, qs = parts.path.rstrip("/") or "/", parse_qs(parts.query)
-    conn = get_conn()
+    path = "/" + parts.path.strip("/")
+    query = {key: values[0] for key, values in parse_qs(parts.query, keep_blank_values=True).items()}
+    handler, params, allowed = _match(verb, path)
+    if handler is None:
+        if allowed:
+            return _reply(405, {"detail": METHOD_NOT_ALLOWED_DETAIL, "code": METHOD_NOT_ALLOWED}, {"Allow": ", ".join(sorted(allowed))})
+        return _reply(404, {"detail": f"no route {verb} {path}", "code": NOT_FOUND}, {})
     out_headers: dict[str, str] = {}
     try:
-        for m, pat, name in ROUTES:
-            match = pat.match(path)
-            if not match or m != method.upper():
-                continue
-            params = {k: int(v) for k, v in match.groupdict().items()}
-            data = json.loads(body) if body else {}
-            status, result = _dispatch(name, conn, params, qs, data, headers, out_headers)
-            return {"status": status, "headers": out_headers, "body": result}
-        return {"status": 404, "headers": out_headers, "body": {"detail": f"no route {method} {path}"}}
-    except service.ServiceError as e:
-        return {"status": e.status, "headers": out_headers, "body": {"detail": e.detail}}
-    except ValidationError as e:
-        return {"status": 422, "headers": out_headers, "body": {"detail": json.loads(e.json())}}
-    except (ValueError, json.JSONDecodeError) as e:
-        return {"status": 422, "headers": out_headers, "body": {"detail": str(e)}}
-
-
-def _dispatch(name, conn, p, qs, data, headers, out_headers):
-    if name == "health":
-        return 200, {"status": "ok", "version": __version__, "runtime": "pyodide"}
-    if name == "integrity":
-        return 200, service.ledger_integrity(conn)
-    if name == "list_stores":
-        return 200, service.list_stores(conn)
-    if name == "create_store":
-        return 201, service.create_store(conn, schemas.StoreIn(**data))
-    if name == "list_products":
-        limit, offset = _q(qs, "limit", 20, int), _q(qs, "offset", 0, int)
-        items, total = service.list_products(conn, _q(qs, "q"), _q(qs, "category"), limit, offset)
-        return 200, _page(items, total, limit, offset)
-    if name == "create_product":
-        return 201, service.create_product(conn, schemas.ProductIn(**data))
-    if name == "get_product":
-        return 200, service.get_product(conn, p["product_id"])
-    if name == "list_inventory":
-        limit, offset = _q(qs, "limit", 50, int), _q(qs, "offset", 0, int)
-        items, total = service.list_inventory(conn, _q(qs, "store_id", None, int), _q(qs, "low_stock", False, bool), limit, offset)
-        return 200, _page(items, total, limit, offset)
-    if name == "get_inventory":
-        return 200, service.get_inventory_row(conn, p["store_id"], p["product_id"])
-    if name == "adjust":
-        return 200, service.adjust_stock(conn, p["store_id"], p["product_id"], schemas.StockAdjust(**data))
-    if name == "movements":
-        return 200, service.movements(conn, p["store_id"], p["product_id"], _q(qs, "limit", 50, int))
-    if name == "transfer":
-        return 200, service.transfer(conn, schemas.TransferIn(**data))
-    if name == "list_orders":
-        limit, offset = _q(qs, "limit", 20, int), _q(qs, "offset", 0, int)
-        items, total = service.list_orders(conn, _q(qs, "store_id", None, int), _q(qs, "status"), limit, offset)
-        return 200, _page(items, total, limit, offset)
-    if name == "place_order":
-        order, created = service.place_order(conn, schemas.OrderIn(**data), headers.get("idempotency-key"))
-        out_headers["Idempotent-Replayed"] = "false" if created else "true"
-        return (201 if created else 200), order
-    if name == "get_order":
-        return 200, service.get_order(conn, p["order_id"])
-    if name == "cancel_order":
-        return 200, service.cancel_order(conn, p["order_id"])
-    if name == "fulfil_order":
-        return 200, service.fulfil_order(conn, p["order_id"])
-    if name == "reorder":
-        return 200, service.reorder_report(conn)
-    raise service.ServiceError(500, f"unhandled route {name}")
+        data = _parse_body(body)
+    except json.JSONDecodeError as exc:
+        return _reply(422, {"detail": _json_invalid_detail(exc), "code": VALIDATION}, out_headers)
+    conn = get_conn()
+    call = BridgeCall(
+        conn=conn,
+        params=params,
+        query=query,
+        body=data,
+        headers={str(key).lower(): value for key, value in (headers or {}).items()},
+        out_headers=out_headers,
+    )
+    try:
+        status, result = handler(call)
+    except ServiceError as exc:
+        return _reply(exc.status, exc.to_body(), out_headers)
+    except ValidationError as exc:
+        return _reply(422, {"detail": _validation_detail(exc), "code": VALIDATION}, out_headers)
+    except Exception:
+        logger.exception("unhandled error in bridge handler for %s %s", verb, path)
+        return _reply(500, {"detail": INTERNAL_ERROR_DETAIL, "code": INTERNAL}, out_headers)
+    finally:
+        _rollback(conn)  # a handler that failed mid-transaction must not poison the shared connection
+    return _reply(status, None if status == 204 else result, out_headers)
 
 
 def handle_json(method: str, url: str, body: str | None = None, headers_json: str | None = None) -> str:
-    """String-in / string-out wrapper for the JS side (avoids proxy juggling)."""
+    """String-in / string-out wrapper for the JavaScript side (avoids proxy juggling across the Pyodide boundary)."""
     headers = json.loads(headers_json) if headers_json else {}
-    return json.dumps(handle(method, url, body or None, headers), default=str)
+    return json.dumps(handle(method, url, body or None, headers if isinstance(headers, dict) else {}), default=str)
