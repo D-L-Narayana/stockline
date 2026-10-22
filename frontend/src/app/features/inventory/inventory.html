@@ -1,0 +1,70 @@
+<header class="page-head">
+  <h1>Inventory</h1>
+  <div class="actions">
+    <a class="btn ghost" [href]="csvUrl()" download>Export CSV</a>
+    <button type="button" class="btn" (click)="showReceipt.set(!showReceipt())">{{ showReceipt() ? 'Close' : 'Receive stock' }}</button>
+  </div>
+</header>
+<app-error-banner [error]="error()" />
+@if (notice(); as n) { <div class="banner ok" role="status">{{ n }}</div> }
+
+@if (showReceipt()) {
+  <form class="card form-grid" [formGroup]="receipt" (ngSubmit)="submitReceipt()" novalidate>
+    <label>Store
+      <select formControlName="store_id" [attr.aria-invalid]="invalid('store_id')">
+        <option [ngValue]="0" disabled>Select store…</option>
+        @for (s of stores(); track s.id) { <option [ngValue]="s.id">{{ s.code }} — {{ s.name }}</option> }
+      </select>
+    </label>
+    <label>Product
+      <select formControlName="product_id" [attr.aria-invalid]="invalid('product_id')">
+        <option [ngValue]="0" disabled>Select product…</option>
+        @for (p of products(); track p.id) { <option [ngValue]="p.id">{{ p.sku }} — {{ p.name }}</option> }
+      </select>
+    </label>
+    <label>Reference (PO / supplier)
+      <input formControlName="reference" placeholder="PO-2026-0042" [attr.aria-invalid]="invalid('reference')" />
+    </label>
+    <label>Quantity
+      <input type="number" min="1" formControlName="quantity" [attr.aria-invalid]="invalid('quantity')" />
+    </label>
+    <div class="actions"><button type="submit" class="btn" [disabled]="receipt.invalid">Book receipt</button></div>
+  </form>
+}
+
+<div class="toolbar">
+  <select aria-label="Filter by store" (change)="setStore($any($event.target).value)">
+    <option value="" [selected]="storeId() === null">All stores</option>
+    @for (s of stores(); track s.id) { <option [value]="s.id" [selected]="storeId() === s.id">{{ s.code }} — {{ s.name }}</option> }
+  </select>
+  <label class="check"><input type="checkbox" [checked]="lowStock()" (change)="setLowStock($any($event.target).checked)" /> Low stock only</label>
+  <input type="search" placeholder="Search SKU or name…" #searchBox (input)="search(searchBox.value)" aria-label="Search inventory" />
+  <span class="muted">{{ total() }} rows</span>
+</div>
+
+<div class="table-wrap">
+  <table>
+    <thead><tr><th>Store</th><th>SKU</th><th>Product</th><th class="num">On hand</th><th class="num">Reorder at</th><th class="num">Unit price</th><th class="num">Value</th><th class="num">Ver.</th></tr></thead>
+    <tbody>
+      @for (r of rows(); track r.store_id + '-' + r.product_id) {
+        <tr [class.low]="r.below_reorder">
+          <td><code>{{ r.store_code }}</code></td>
+          <td><code>{{ r.sku }}</code></td>
+          <td>{{ r.name }}</td>
+          <td class="num" [class.danger]="r.below_reorder">{{ r.on_hand }}</td>
+          <td class="num">{{ r.reorder_point }}</td>
+          <td class="num">{{ r.price_cents | money }}</td>
+          <td class="num">{{ r.value_cents | money }}</td>
+          <td class="num muted">{{ r.version }}</td>
+        </tr>
+      } @empty {
+        <tr><td colspan="8" class="muted">{{ loading() ? 'Loading…' : 'No inventory rows match.' }}</td></tr>
+      }
+    </tbody>
+  </table>
+</div>
+<nav class="pager">
+  <button type="button" class="btn ghost small" (click)="page(-1)" [disabled]="offset() === 0">← Prev</button>
+  <span class="muted">{{ total() === 0 ? 0 : offset() + 1 }}–{{ offset() + rows().length }} of {{ total() }}</span>
+  <button type="button" class="btn ghost small" (click)="page(1)" [disabled]="offset() + pageSize >= total()">Next →</button>
+</nav>

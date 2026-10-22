@@ -61,6 +61,29 @@ jobs:
           path: site
           if-no-files-found: error
 
+  frontend:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install
+        run: npm ci
+
+      - name: Unit tests (Vitest)
+        run: npx ng test --watch=false
+
+      - name: Production build
+        run: npx ng build
+
   docker:
     runs-on: ubuntu-latest
     steps:

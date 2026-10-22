@@ -1,0 +1,45 @@
+<header class="page-head">
+  <h1>Orders</h1>
+  <a class="btn" routerLink="/orders/new">Place order</a>
+</header>
+<app-error-banner [error]="error()" />
+
+<div class="toolbar">
+  <select aria-label="Filter by store" (change)="setStore($any($event.target).value)">
+    <option value="">All stores</option>
+    @for (s of stores(); track s.id) { <option [value]="s.id">{{ s.code }} — {{ s.name }}</option> }
+  </select>
+  <select aria-label="Filter by status" (change)="setStatus($any($event.target).value)">
+    <option value="">Any status</option>
+    <option value="placed">placed</option>
+    <option value="fulfilled">fulfilled</option>
+    <option value="cancelled">cancelled</option>
+  </select>
+  <span class="muted">{{ total() }} orders</span>
+</div>
+
+<div class="table-wrap">
+  <table>
+    <thead><tr><th>#</th><th>Store</th><th>Status</th><th class="num">Lines</th><th class="num">Total</th><th>Created</th><th>Idempotency key</th></tr></thead>
+    <tbody>
+      @for (o of items(); track o.id) {
+        <tr>
+          <td><a [routerLink]="['/orders', o.id]">{{ o.id }}</a></td>
+          <td><code>{{ storeCode(o.store_id) }}</code></td>
+          <td><span class="pill" [class.ok]="o.status === 'fulfilled'" [class.warn]="o.status === 'placed'" [class.danger]="o.status === 'cancelled'">{{ o.status }}</span></td>
+          <td class="num">{{ o.lines.length }}</td>
+          <td class="num">{{ o.total_cents | money }}</td>
+          <td class="muted">{{ o.created_at.slice(0, 19).replace('T', ' ') }}</td>
+          <td class="muted"><code>{{ o.idempotency_key ?? '—' }}</code></td>
+        </tr>
+      } @empty {
+        <tr><td colspan="7" class="muted">{{ loading() ? 'Loading…' : 'No orders match.' }}</td></tr>
+      }
+    </tbody>
+  </table>
+</div>
+<nav class="pager">
+  <button type="button" class="btn ghost small" (click)="page(-1)" [disabled]="offset() === 0">← Prev</button>
+  <span class="muted">{{ total() === 0 ? 0 : offset() + 1 }}–{{ offset() + items().length }} of {{ total() }}</span>
+  <button type="button" class="btn ghost small" (click)="page(1)" [disabled]="offset() + pageSize >= total()">Next →</button>
+</nav>

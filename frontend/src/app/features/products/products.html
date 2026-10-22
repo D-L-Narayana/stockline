@@ -1,0 +1,63 @@
+<header class="page-head">
+  <h1>Products</h1>
+  <button type="button" class="btn" (click)="showForm.set(!showForm())">{{ showForm() ? 'Close' : 'New product' }}</button>
+</header>
+<app-error-banner [error]="error()" />
+@if (saved(); as p) { <div class="banner ok" role="status">Created <code>{{ p.sku }}</code> — {{ p.name }}</div> }
+
+@if (showForm()) {
+  <form class="card form-grid" [formGroup]="form" (ngSubmit)="submit()" novalidate>
+    <label>SKU
+      <input formControlName="sku" placeholder="GRO-RICE-5KG" autocomplete="off" [attr.aria-invalid]="invalid('sku')" />
+      @if (invalid('sku')) { <small class="danger">3–32 chars, uppercase letters, digits and dashes only.</small> }
+    </label>
+    <label>Name
+      <input formControlName="name" placeholder="Basmati Rice 5 kg" [attr.aria-invalid]="invalid('name')" />
+      @if (invalid('name')) { <small class="danger">Required (max 120 chars).</small> }
+    </label>
+    <label>Category
+      <input formControlName="category" placeholder="Grocery" [attr.aria-invalid]="invalid('category')" />
+      @if (invalid('category')) { <small class="danger">Required.</small> }
+    </label>
+    <label>Price (₹)
+      <input type="number" step="0.01" min="0" formControlName="price_rupees" [attr.aria-invalid]="invalid('price_rupees')" />
+      @if (invalid('price_rupees')) { <small class="danger">Must be 0 or more.</small> }
+    </label>
+    <label>Reorder point
+      <input type="number" min="0" formControlName="reorder_point" [attr.aria-invalid]="invalid('reorder_point')" />
+    </label>
+    <div class="actions"><button type="submit" class="btn" [disabled]="form.invalid">Create</button></div>
+  </form>
+}
+
+<div class="toolbar">
+  <input type="search" placeholder="Search SKU or name…" #searchBox (input)="search(searchBox.value)" aria-label="Search products" />
+  <label class="check"><input type="checkbox" (change)="toggleInactive($any($event.target).checked)" /> Include inactive</label>
+  <span class="muted">{{ total() }} products</span>
+</div>
+
+<div class="table-wrap">
+  <table>
+    <thead><tr><th>SKU</th><th>Name</th><th>Category</th><th class="num">Price</th><th class="num">Reorder at</th><th>Status</th><th></th></tr></thead>
+    <tbody>
+      @for (p of items(); track p.id) {
+        <tr [class.inactive]="!p.active">
+          <td><code>{{ p.sku }}</code></td>
+          <td>{{ p.name }}</td>
+          <td>{{ p.category }}</td>
+          <td class="num">{{ p.price_cents | money }}</td>
+          <td class="num">{{ p.reorder_point }}</td>
+          <td><span class="pill" [class.ok]="p.active">{{ p.active ? 'active' : 'inactive' }}</span></td>
+          <td class="num">@if (p.active) { <button type="button" class="btn ghost small" (click)="deactivate(p)">Deactivate</button> }</td>
+        </tr>
+      } @empty {
+        <tr><td colspan="7" class="muted">{{ loading() ? 'Loading…' : 'No products match.' }}</td></tr>
+      }
+    </tbody>
+  </table>
+</div>
+<nav class="pager">
+  <button type="button" class="btn ghost small" (click)="page(-1)" [disabled]="offset() === 0">← Prev</button>
+  <span class="muted">{{ total() === 0 ? 0 : offset() + 1 }}–{{ offset() + items().length }} of {{ total() }}</span>
+  <button type="button" class="btn ghost small" (click)="page(1)" [disabled]="offset() + pageSize >= total()">Next →</button>
+</nav>

@@ -1,0 +1,36 @@
+<header class="page-head">
+  <h1>Order @if (order(); as o) { #{{ o.id }} }</h1>
+  <a class="btn ghost" routerLink="/orders">← Orders</a>
+</header>
+<app-error-banner [error]="error()" />
+@if (replayed()) { <div class="banner ok" role="status">This request replayed an existing order (same Idempotency-Key) — nothing was duplicated.</div> }
+
+@if (order(); as o) {
+  <section class="card">
+    <dl class="facts">
+      <div><dt>Status</dt><dd><span class="pill" [class.ok]="o.status === 'fulfilled'" [class.warn]="o.status === 'placed'" [class.danger]="o.status === 'cancelled'">{{ o.status }}</span></dd></div>
+      <div><dt>Store</dt><dd>#{{ o.store_id }}</dd></div>
+      <div><dt>Total</dt><dd>{{ o.total_cents | money }}</dd></div>
+      <div><dt>Created</dt><dd>{{ o.created_at.slice(0, 19).replace('T', ' ') }} UTC</dd></div>
+      <div><dt>Idempotency key</dt><dd><code>{{ o.idempotency_key ?? '—' }}</code></dd></div>
+    </dl>
+    @if (o.status === 'placed') {
+      <div class="actions">
+        <button type="button" class="btn" (click)="fulfil()" [disabled]="busy()">Fulfil</button>
+        <button type="button" class="btn ghost" (click)="cancel()" [disabled]="busy()">Cancel (returns stock)</button>
+      </div>
+    }
+  </section>
+
+  <div class="table-wrap">
+    <table>
+      <thead><tr><th>SKU</th><th class="num">Qty</th><th class="num">Unit price</th><th class="num">Line total</th></tr></thead>
+      <tbody>
+        @for (l of o.lines; track l.product_id) {
+          <tr><td><code>{{ l.sku }}</code></td><td class="num">{{ l.quantity }}</td><td class="num">{{ l.unit_price_cents | money }}</td><td class="num">{{ l.line_total_cents | money }}</td></tr>
+        }
+      </tbody>
+      <tfoot><tr><th colspan="3">Total</th><th class="num">{{ o.total_cents | money }}</th></tr></tfoot>
+    </table>
+  </div>
+}

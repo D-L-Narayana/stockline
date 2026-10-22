@@ -1,0 +1,57 @@
+<header class="page-head">
+  <h1>Dashboard</h1>
+  <button type="button" class="btn ghost" (click)="reload()" [disabled]="loading()">Refresh</button>
+</header>
+<app-error-banner [error]="error()" />
+
+@if (summary(); as s) {
+  <section class="kpis">
+    <article class="card"><span class="label">Stock value</span><strong>{{ s.totals.value_cents | money }}</strong><span class="muted">{{ s.totals.units }} units · {{ s.totals.skus }} SKUs</span></article>
+    <article class="card" [class.warn]="s.totals.low_stock > 0"><span class="label">Low stock</span><strong>{{ s.totals.low_stock }}</strong><span class="muted">rows at or below reorder point</span></article>
+    <article class="card"><span class="label">Orders</span><strong>{{ s.orders.placed + s.orders.fulfilled + s.orders.cancelled }}</strong><span class="muted">{{ s.orders.placed }} placed · {{ s.orders.fulfilled }} fulfilled · {{ s.orders.cancelled }} cancelled</span></article>
+    <article class="card"><span class="label">Revenue (fulfilled)</span><strong>{{ s.revenue_cents.fulfilled | money }}</strong><span class="muted">{{ s.revenue_cents.placed | money }} still open</span></article>
+    <article class="card"><span class="label">Products</span><strong>{{ s.products.active }}</strong><span class="muted">{{ s.products.inactive }} inactive</span></article>
+  </section>
+
+  <h2>Stores</h2>
+  <div class="table-wrap">
+    <table>
+      <thead><tr><th>Code</th><th>Store</th><th class="num">SKUs</th><th class="num">Units</th><th class="num">Value</th><th class="num">Low stock</th></tr></thead>
+      <tbody>
+        @for (st of s.stores; track st.store_id) {
+          <tr>
+            <td><code>{{ st.store_code }}</code></td>
+            <td>{{ st.store_name }}</td>
+            <td class="num">{{ st.skus }}</td>
+            <td class="num">{{ st.units }}</td>
+            <td class="num">{{ st.value_cents | money }}</td>
+            <td class="num"><a [routerLink]="['/inventory']" [queryParams]="{ store_id: st.store_id, low_stock: 1 }">{{ st.low_stock }}</a></td>
+          </tr>
+        }
+      </tbody>
+    </table>
+  </div>
+}
+
+<h2>Needs reordering</h2>
+@if (!loading() && lowStock().length === 0) {
+  <p class="muted">Nothing is below its reorder point.</p>
+} @else {
+  <div class="table-wrap">
+    <table>
+      <thead><tr><th>Store</th><th>SKU</th><th>Product</th><th class="num">On hand</th><th class="num">Reorder at</th></tr></thead>
+      <tbody>
+        @for (r of lowStock(); track r.store_id + '-' + r.product_id) {
+          <tr>
+            <td><code>{{ r.store_code }}</code></td>
+            <td><code>{{ r.sku }}</code></td>
+            <td>{{ r.name }}</td>
+            <td class="num danger">{{ r.on_hand }}</td>
+            <td class="num">{{ r.reorder_point }}</td>
+          </tr>
+        }
+      </tbody>
+    </table>
+  </div>
+  <p><a routerLink="/inventory" [queryParams]="{ low_stock: 1 }">See all low-stock rows →</a></p>
+}

@@ -1,11 +1,14 @@
-# StockLine — multi-store inventory & order API
+# StockLine — multi-store inventory & order management (Angular 21 + FastAPI + SQL)
 
 [![CI](https://github.com/D-L-Narayana/stockline/actions/workflows/ci.yml/badge.svg)](https://github.com/D-L-Narayana/stockline/actions/workflows/ci.yml)
 [![Demo](https://img.shields.io/badge/demo-live-CC0000)](https://d-l-narayana.github.io/stockline/)
 
-A small but production-shaped REST API for tracking stock across retail stores and
-taking orders against it **without ever overselling**. Python + FastAPI + SQLite, no ORM —
-the interesting parts are plain SQL and transactions.
+A small but production-shaped full-stack application for tracking stock across retail stores and
+taking orders against it **without ever overselling**. Backend: Python 3 + FastAPI + SQLite, no ORM —
+the interesting parts are plain SQL and transactions. Frontend: an **Angular 21** app
+(`frontend/`, standalone components, signals, reactive forms, lazy routes) that drives the
+same REST API — dashboard, catalogue, inventory with receipts and CSV export, and an idempotent
+order checkout. See [`frontend/README.md`](frontend/README.md).
 
 **Live demo:** <https://d-l-narayana.github.io/stockline/> — runs the actual Python
 service layer in your browser via Pyodide, so you can place orders, replay an
@@ -46,6 +49,13 @@ Interactive OpenAPI docs at `/docs` when running the server. Errors are JSON:
 `{"detail": "...", "code": "insufficient_stock", "request_id": "..."}`.
 
 ## Run locally
+
+Full stack (API on :8000, Angular dev server on :4200 proxying `/api` to it):
+
+```bash
+STOCKLINE_SEED=1 uvicorn app.main:app --reload        # terminal 1
+cd frontend && npm install && npm start                # terminal 2 -> http://localhost:4200
+```
 
 ```bash
 pip install -r requirements-dev.txt
@@ -89,6 +99,7 @@ app/
 tests/           pytest + httpx TestClient: domain, migrations, parity, OpenAPI, concurrency,
                  model-based ledger test, static UI checks; node tests for the UI helpers
 public/          dashboard: index.html, app.js, lib.js, styles.css (vanilla JS, no build step, CSP-clean)
+frontend/        Angular 21 application (standalone components, signals, reactive forms, Vitest) — see frontend/README.md
 scripts/         dev.py task runner, build_site.py, smoke.sh, bench.py, browser_check.mjs
 docs/            architecture, migrations, operations, concurrency
 ```

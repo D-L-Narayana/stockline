@@ -1,0 +1,24 @@
+<a class="skip" href="#main">Skip to content</a>
+<header class="topbar">
+  <a routerLink="/dashboard" class="brand"><span class="logo" aria-hidden="true">▣</span> {{ title() }}</a>
+  <button type="button" class="btn ghost small menu" (click)="menuOpen.set(!menuOpen())" [attr.aria-expanded]="menuOpen()" aria-controls="nav">Menu</button>
+  <nav id="nav" [class.open]="menuOpen()" aria-label="Main">
+    @for (l of links; track l.path) {
+      <a [routerLink]="l.path" routerLinkActive="active" (click)="menuOpen.set(false)">{{ l.label }}</a>
+    }
+  </nav>
+  <details class="settings">
+    <summary>API</summary>
+    <div class="card">
+      <p class="muted">Base URL <code>{{ apiBase }}</code></p>
+      <label>API key (optional)
+        <input type="password" [value]="apiKey()" #key (change)="saveApiKey(key.value)" placeholder="STOCKLINE_API_KEY" autocomplete="off" />
+      </label>
+      <small class="muted">Sent as <code>X-API-Key</code> on every request.</small>
+    </div>
+  </details>
+</header>
+<main id="main" class="container">
+  <router-outlet />
+</main>
+<footer class="muted container">StockLine UI — Angular 21 · FastAPI backend · <a href="https://github.com/D-L-Narayana/stockline">source</a></footer>

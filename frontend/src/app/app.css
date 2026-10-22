@@ -1,0 +1,22 @@
+.skip { position: absolute; left: -999px; }
+.skip:focus { left: 8px; top: 8px; background: #fff; padding: 6px 10px; z-index: 10; }
+.topbar { display: flex; align-items: center; gap: 1rem; padding: 0.6rem 1.25rem; background: #0f172a; color: #e2e8f0; position: sticky; top: 0; z-index: 5; flex-wrap: wrap; }
+.brand { color: #fff; font-weight: 700; text-decoration: none; font-size: 1.1rem; display: inline-flex; gap: 0.4rem; align-items: center; }
+.logo { color: #38bdf8; }
+nav { display: flex; gap: 0.25rem; margin-left: auto; }
+nav a { color: #cbd5e1; text-decoration: none; padding: 0.4rem 0.75rem; border-radius: 6px; }
+nav a:hover { background: #1e293b; color: #fff; }
+nav a.active { background: #1d4ed8; color: #fff; }
+.menu { display: none; margin-left: auto; color: #e2e8f0; border-color: #334155; }
+.settings { position: relative; }
+.settings summary { cursor: pointer; color: #cbd5e1; padding: 0.4rem 0.75rem; list-style: none; }
+.settings[open] summary { color: #fff; }
+.settings .card { position: absolute; right: 0; top: 2.4rem; width: 20rem; color: #0f172a; }
+footer { padding: 2rem 1.25rem; font-size: 0.85rem; }
+@media (max-width: 720px) {
+  .menu { display: inline-block; }
+  nav { display: none; width: 100%; flex-direction: column; margin-left: 0; }
+  nav.open { display: flex; }
+  .settings { margin-left: auto; }
+  .settings .card { width: min(20rem, 90vw); }
+}
