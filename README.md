@@ -1,7 +1,8 @@
 # StockLine — multi-store inventory & order management (Angular 21 + FastAPI + SQL)
 
 [![CI](https://github.com/D-L-Narayana/stockline/actions/workflows/ci.yml/badge.svg)](https://github.com/D-L-Narayana/stockline/actions/workflows/ci.yml)
-[![Demo](https://img.shields.io/badge/demo-live-CC0000)](https://d-l-narayana.github.io/stockline/)
+[![Full-stack demo](https://img.shields.io/badge/full--stack%20demo-stockline--ruddy.vercel.app-1d4ed8)](https://stockline-ruddy.vercel.app)
+[![In-browser demo](https://img.shields.io/badge/in--browser%20demo-GitHub%20Pages-CC0000)](https://d-l-narayana.github.io/stockline/)
 
 A small but production-shaped full-stack application for tracking stock across retail stores and
 taking orders against it **without ever overselling**. Backend: Python 3 + FastAPI + SQLite, no ORM —
@@ -10,7 +11,10 @@ the interesting parts are plain SQL and transactions. Frontend: an **Angular 21*
 same REST API — dashboard, catalogue, inventory with receipts and CSV export, and an idempotent
 order checkout. See [`frontend/README.md`](frontend/README.md).
 
-**Live demo:** <https://d-l-narayana.github.io/stockline/> — runs the actual Python
+**Full-stack demo:** <https://stockline-ruddy.vercel.app> — the Angular 21 UI talking to the FastAPI
+backend over `/api` (Vercel; the SQLite database is re-seeded on each cold start).
+
+**In-browser demo:** <https://d-l-narayana.github.io/stockline/> — runs the actual Python
 service layer in your browser via Pyodide, so you can place orders, replay an
 idempotency key, trigger a stale-version 409, audit the ledger and export CSVs without a server.
 
